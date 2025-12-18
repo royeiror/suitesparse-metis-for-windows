@@ -55,7 +55,7 @@ jobs:
             Copy-Item -Path "install/lib/cmake/*" -Destination "binaries/" -Recurse -Force
           }
           
-          # Add version info
+          # Add version info - using Write-Host and Out-File separately to avoid YAML issues
           $date = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
           $commit = "${{ github.sha }}"
           if ($commit.Length -gt 7) {
@@ -64,19 +64,16 @@ jobs:
             $shortCommit = $commit
           }
           
-          # Using a simpler approach for the version info
-          $info = @"
-SuiteSparse with METIS - Windows Binaries
-=========================================
-Build Date: $date
-Commit: $shortCommit
-Full Commit SHA: $commit
-GitHub Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-Build Type: Release
-Toolchain: Visual Studio 2022 (vs-win64)
-METIS: Enabled
-"@
-          $info | Out-File -FilePath "binaries/README.txt" -Encoding UTF8
+          # Write the README file line by line to avoid YAML parsing issues
+          "SuiteSparse with METIS - Windows Binaries" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8
+          "=========================================" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "Build Date: $date" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "Commit: $shortCommit" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "Full Commit SHA: $commit" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "GitHub Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "Build Type: Release" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "Toolchain: Visual Studio 2022 (vs-win64)" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
+          "METIS: Enabled" | Out-File -FilePath "binaries/README.txt" -Encoding UTF8 -Append
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -100,13 +97,12 @@ METIS: Enabled
               # Check if there are changes
               $status = git status --porcelain
               if ($status) {
-                $commitMsg = "ci: Add Windows binaries for SuiteSparse-METIS [skip ci]
+                $commitDate = Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC'
+                git commit -m "ci: Add Windows binaries for SuiteSparse-METIS [skip ci]
 
                 Built from commit: ${{ github.sha }}
                 GitHub Run ID: ${{ github.run_id }}
-                Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')"
-                
-                git commit -m "$commitMsg"
+                Date: $commitDate"
                 
                 # Pull latest changes and push
                 git pull --rebase origin ${{ github.ref_name }}
