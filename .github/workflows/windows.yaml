@@ -1,21 +1,15 @@
-name: Build Windows SuiteSparse-METIS
+name: Build and Store Windows Binaries
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
-  release:
-    types: [created]
 
 permissions:
-  contents: write  # Needed for pushing binaries back to repo
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        config: [Release]
-        toolchain: [vs-win64, vs-win64-cxx20]
     
     steps:
       - uses: actions/checkout@v4
@@ -26,117 +20,56 @@ jobs:
       
       - name: Configure CMake
         run: |
-          cmake -S . -B build-${{ matrix.toolchain }} -G "Ninja" `
-                -DCMAKE_TOOLCHAIN_FILE="ci/toolchains/${{ matrix.toolchain }}.cmake" `
+          cmake -S . -B build -G "Ninja" `
+                -DCMAKE_TOOLCHAIN_FILE="ci/toolchains/vs-win64.cmake" `
                 -DBUILD_METIS=ON `
-                -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+                -DCMAKE_BUILD_TYPE=Release
       
       - name: Build
         run: |
-          cmake --build build-${{ matrix.toolchain }} --config ${{ matrix.config }} --parallel
+          cmake --build build --config Release --parallel
       
       - name: Install
         run: |
-          cmake --install build-${{ matrix.toolchain }} --prefix install-${{ matrix.toolchain }} --config ${{ matrix.config }}
+          cmake --install build --prefix install --config Release
       
-      - name: Package binaries
+      - name: Prepare binaries for storage
         run: |
-          # Create a clean directory for packaging
-          mkdir -p package-${{ matrix.toolchain }}
+          # Clean old binaries
+          Remove-Item -rf binaries 2>$null
+          mkdir -p binaries
           
-          # Copy the important files
-          if (Test-Path "install-${{ matrix.toolchain }}/bin") {
-            Copy-Item -Path "install-${{ matrix.toolchain }}/bin/*" -Destination "package-${{ matrix.toolchain }}/" -Recurse -Force
+          # Copy built files
+          if (Test-Path "install/bin") {
+            Copy-Item -Path "install/bin/*" -Destination "binaries/" -Recurse
           }
-          if (Test-Path "install-${{ matrix.toolchain }}/lib") {
-            Copy-Item -Path "install-${{ matrix.toolchain }}/lib/*" -Destination "package-${{ matrix.toolchain }}/" -Recurse -Force
+          if (Test-Path "install/lib") {
+            Copy-Item -Path "install/lib/*" -Destination "binaries/" -Recurse
           }
-          if (Test-Path "install-${{ matrix.toolchain }}/include") {
-            Copy-Item -Path "install-${{ matrix.toolchain }}/include/*" -Destination "package-${{ matrix.toolchain }}/" -Recurse -Force
+          if (Test-Path "install/include") {
+            Copy-Item -Path "install/include/*" -Destination "binaries/" -Recurse
           }
           
-          # Create zip archive
-          Compress-Archive -Path "package-${{ matrix.toolchain }}/*" -DestinationPath "suitesparse-${{ matrix.toolchain }}.zip" -Force
+          # Add version info
+          $date = Get-Date -Format "yyyy-MM-dd"
+          "Built: $date" | Out-File -FilePath "binaries/BUILD_INFO.txt"
       
-      - name: Upload binaries as artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: suitesparse-windows-${{ matrix.toolchain }}
-          path: |
-            suitesparse-${{ matrix.toolchain }}.zip
-            install-${{ matrix.toolchain }}/
-          retention-days: 30
-  
-  deploy:
-    runs-on: windows-latest
-    needs: build
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: suitesparse-windows-binaries
+          path: binaries/*
+          retention-days: 7
       
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: suitesparse-windows-*
-          merge-multiple: true
-      
-      - name: Prepare binaries directory
-        run: |
-          # Remove old binaries if they exist
-          Remove-Item -Path binaries -Recurse -Force -ErrorAction SilentlyContinue
-          mkdir -p binaries/windows
-          
-          # Find and extract all zip files
-          Get-ChildItem artifacts -Filter "*.zip" | ForEach-Object {
-            $toolchain = $_.BaseName -replace 'suitesparse-', ''
-            Expand-Archive -Path $_.FullName -DestinationPath "binaries/windows/$toolchain" -Force
-          }
-          
-          # Also copy any extracted directories
-          Get-ChildItem artifacts -Directory | Where-Object { $_.Name -like "install-*" } | ForEach-Object {
-            $toolchain = $_.Name -replace 'install-', ''
-            Copy-Item -Path "$_/*" -Destination "binaries/windows/$toolchain/" -Recurse -Force
-          }
-      
-      - name: Add version info
-        run: |
-          $date = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          $commit = "${{ github.sha }}"
-          if ($commit.Length -gt 7) {
-            $commit = $commit.Substring(0, 7)
-          }
-          $versionInfo = @"
-SuiteSparse with METIS - Windows Binaries
-=========================================
-Built: $date
-Commit: $commit
-GitHub Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-Toolchains: ${{ join(matrix.toolchain, ', ') }}
-"@
-          
-          $versionInfo | Out-File -FilePath "binaries/README.md" -Encoding UTF8
-          
-          # Also create a simple VERSION file
-          "Build $date - $commit" | Out-File -FilePath "binaries/VERSION.txt" -Encoding UTF8
-      
-      - name: Commit and push binaries
+      - name: Commit binaries to repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage only binaries directory
           git add binaries/
           
-          # Check if there are changes
-          $changes = git status --porcelain
-          if ($changes) {
-            git commit -m "ci: Update Windows binaries for SuiteSparse-METIS [skip ci]"
-            git pull --rebase origin ${{ github.ref_name }}
-            git push origin HEAD:${{ github.ref_name }}
-          } else {
-            Write-Host "No changes to commit"
+          # Only commit if there are changes
+          if (!(git diff --cached --quiet)) {
+            git commit -m "ci: Add Windows binaries [skip ci]"
+            git push
           }
