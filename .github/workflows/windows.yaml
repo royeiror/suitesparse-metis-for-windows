@@ -35,30 +35,52 @@ jobs:
       
       - name: Prepare binaries for storage
         run: |
-          # Clean old binaries
-          Remove-Item -rf binaries 2>$null
-          mkdir -p binaries
+          # Clean old binaries - PowerShell syntax
+          Remove-Item -Path "binaries" -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path "binaries" -Force | Out-Null
           
           # Copy built files
           if (Test-Path "install/bin") {
-            Copy-Item -Path "install/bin/*" -Destination "binaries/" -Recurse
+            Copy-Item -Path "install/bin/*" -Destination "binaries/" -Recurse -Force
           }
           if (Test-Path "install/lib") {
-            Copy-Item -Path "install/lib/*" -Destination "binaries/" -Recurse
+            Copy-Item -Path "install/lib/*" -Destination "binaries/" -Recurse -Force
           }
           if (Test-Path "install/include") {
-            Copy-Item -Path "install/include/*" -Destination "binaries/" -Recurse
+            Copy-Item -Path "install/include/*" -Destination "binaries/" -Recurse -Force
+          }
+          
+          # Copy CMake config files if they exist
+          if (Test-Path "install/lib/cmake") {
+            Copy-Item -Path "install/lib/cmake/*" -Destination "binaries/" -Recurse -Force
           }
           
           # Add version info
-          $date = Get-Date -Format "yyyy-MM-dd"
-          "Built: $date" | Out-File -FilePath "binaries/BUILD_INFO.txt"
+          $date = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
+          $commit = "${{ github.sha }}"
+          if ($commit.Length -gt 7) {
+            $shortCommit = $commit.Substring(0, 7)
+          } else {
+            $shortCommit = $commit
+          }
+          
+          @"
+SuiteSparse with METIS - Windows Binaries
+=========================================
+Build Date: $date
+Commit: $shortCommit
+Full Commit SHA: $commit
+GitHub Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+Build Type: Release
+Toolchain: Visual Studio 2022 (vs-win64)
+METIS: Enabled
+"@ | Out-File -FilePath "binaries/README.txt" -Encoding UTF8
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: suitesparse-windows-binaries
-          path: binaries/*
+          path: binaries/
           retention-days: 7
       
       - name: Commit binaries to repo
@@ -66,10 +88,32 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          git add binaries/
-          
-          # Only commit if there are changes
-          if (!(git diff --cached --quiet)) {
-            git commit -m "ci: Add Windows binaries [skip ci]"
-            git push
+          # Check if binaries directory exists and has files
+          if (Test-Path "binaries" -PathType Container) {
+            $files = Get-ChildItem -Path "binaries" -Recurse -File
+            if ($files.Count -gt 0) {
+              Write-Host "Found $($files.Count) files in binaries directory"
+              git add binaries/
+              
+              # Check if there are changes
+              $status = git status --porcelain
+              if ($status) {
+                git commit -m "ci: Add Windows binaries for SuiteSparse-METIS [skip ci]
+
+                Built from commit: ${{ github.sha }}
+                GitHub Run ID: ${{ github.run_id }}
+                Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')"
+                
+                # Pull latest changes and push
+                git pull --rebase origin ${{ github.ref_name }}
+                git push origin HEAD:${{ github.ref_name }}
+                Write-Host "Successfully committed and pushed binaries"
+              } else {
+                Write-Host "No changes to commit"
+              }
+            } else {
+              Write-Host "binaries directory is empty"
+            }
+          } else {
+            Write-Host "binaries directory does not exist"
           }
