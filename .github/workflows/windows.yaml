@@ -64,7 +64,8 @@ jobs:
             $shortCommit = $commit
           }
           
-          @"
+          # Using a simpler approach for the version info
+          $info = @"
 SuiteSparse with METIS - Windows Binaries
 =========================================
 Build Date: $date
@@ -74,7 +75,8 @@ GitHub Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.
 Build Type: Release
 Toolchain: Visual Studio 2022 (vs-win64)
 METIS: Enabled
-"@ | Out-File -FilePath "binaries/README.txt" -Encoding UTF8
+"@
+          $info | Out-File -FilePath "binaries/README.txt" -Encoding UTF8
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -98,11 +100,13 @@ METIS: Enabled
               # Check if there are changes
               $status = git status --porcelain
               if ($status) {
-                git commit -m "ci: Add Windows binaries for SuiteSparse-METIS [skip ci]
+                $commitMsg = "ci: Add Windows binaries for SuiteSparse-METIS [skip ci]
 
                 Built from commit: ${{ github.sha }}
                 GitHub Run ID: ${{ github.run_id }}
                 Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')"
+                
+                git commit -m "$commitMsg"
                 
                 # Pull latest changes and push
                 git pull --rebase origin ${{ github.ref_name }}
