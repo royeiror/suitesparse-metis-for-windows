@@ -1,0 +1,53 @@
+# Compute locations from <prefix>/@{LIBRARY_DIR@/cmake/suitesparse-<v>/<self>.cmake
+get_filename_component(_SuiteSparse_SELF_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+get_filename_component(_SuiteSparse_PREFIX "${_SuiteSparse_SELF_DIR}" PATH)
+get_filename_component(_SuiteSparse_PREFIX "${_SuiteSparse_PREFIX}" PATH)
+get_filename_component(_SuiteSparse_PREFIX "${_SuiteSparse_PREFIX}" PATH)
+
+include(CMakeFindDependencyMacro)
+set(_SuiteSparse_WITH_OPENBLAS OFF)
+if (_SuiteSparse_WITH_OPENBLAS)
+  # SuiteSparse was built with OpenBLAS::OpenBLAS cmake target
+  # client projects should use OpenBLAS as well to not mix BLAS/LAPACK
+  # implementations
+  find_dependency(OpenBLAS CONFIG)
+  set(BLA_VENDOR OpenBLAS)
+else()
+  set(_SuiteSparse_LAPACK_used_CONFIG YES)
+  if (_SuiteSparse_LAPACK_used_CONFIG)
+    # use config file which provides LAPACK (and BLAS) for us
+    find_dependency(LAPACK CONFIG)
+  else()
+    # try to find BLAS and LAPACK with modules
+    find_dependency(BLAS)
+    find_dependency(LAPACK)
+  endif()
+endif()
+
+# Load targets from the install tree.
+include(${_SuiteSparse_SELF_DIR}/SuiteSparse-targets.cmake)
+
+# Report SuiteSparse header search locations.
+set(SuiteSparse_INCLUDE_DIRS ${_SuiteSparse_PREFIX}/include)
+
+# Report SuiteSparse libraries.
+set(SuiteSparse_LIBRARIES
+	SuiteSparse::suitesparseconfig
+	SuiteSparse::amd
+	SuiteSparse::btf
+	SuiteSparse::camd
+	SuiteSparse::ccolamd
+	SuiteSparse::colamd
+	SuiteSparse::cholmod
+	SuiteSparse::cxsparse
+	SuiteSparse::klu
+	SuiteSparse::ldl
+	SuiteSparse::umfpack
+	SuiteSparse::spqr
+)
+if(TARGET SuiteSparse::metis)
+  set(SuiteSparse_METIS_VERSION "5.1.0")
+endif()
+
+unset(_SuiteSparse_PREFIX)
+unset(_SuiteSparse_SELF_DIR)
